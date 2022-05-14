@@ -4,7 +4,7 @@ import typing
 import logging
 import inspect
 import string
-from typing import List, Tuple, Type, Callable, Annotated, Literal, Union
+from typing import List, Set, Tuple, Type, Callable, Annotated, Literal, Union
 
 from magritte import SingleArgParser, ArgumentParser
 
@@ -49,6 +49,12 @@ class ListParser(SingleArgParser[List]):
                 break
         logging.debug(f"Parsed {num_parsed_args} args and got {parsed_args}")
         return num_parsed_args, parsed_args
+
+
+class SetParser(ListParser):
+    def parse_single_arg(self, *args, **kwargs):
+        nargs, parsed_val = super().parse_single_arg(*args, **kwargs)
+        return nargs, set(parsed_val)
 
 
 class TupleParser(SingleArgParser[Tuple]):
@@ -138,7 +144,8 @@ class BoolParser(SingleArgParser[bool]):
     #   --should_log                  => True
     #   --no-should_log               => False
     #   --not-should_log              => False
-
+    #  Note: intentionally leaving out -s here
+    
     def parse_single_arg(self, arg_format, args, parser: ArgumentParser):
         logging.debug(f"BoolParser {arg_format} {args}")
         argname = parser.argstr_to_argname(arg_format)
@@ -167,6 +174,8 @@ _all_the_parsers = {
     Tuple: TupleParser,
     list: ListParser,
     List: ListParser,
+    set: SetParser,
+    Set: SetParser,
     Literal: LiteralParser,
     Union: UnionParser
 }
@@ -191,11 +200,30 @@ def guess_parser(argtype: Type, default_value=inspect._empty):
         return _all_the_parsers[str](default_value=default_value)
 
 
-def make_parser(f: Callable) -> ArgumentParser:
-    print(f.__name__)
-    signature = inspect.signature(f, eval_str=True)
+def arg_description(argname: str, argtype: Type, default_value=inspect._empty):
+    basetype, typeargs = typing.get_origin(argtype), typing.get_args(argtype)
+    if basetype is Annotated:
+        argtype, help_message = typeargs
+    else:
+        help_message = argname
+    if argtype is inspect._empty:
+        type_str = ""
+    else:
+        type_str = str(argtype)
+        if type_str.startswith('typing.'):  # horrible hack...
+            type_str = type_str[len('typing.'):]
+    return help_message, type_str
+
+
+def make_parser(func: Callable, **kwargs) -> ArgumentParser:
+    # print(f.__name__)
+    signature = inspect.signature(func, eval_str=True)
     parsers = {}
+    arg_help = {}
+
     for param in signature.parameters.values():
+        arg_help[param.name] = arg_description(param.name, param.annotation, param.default)
         parsers[param.name] = guess_parser(param.annotation, param.default)
 
-    return ArgumentParser(parsers)
+    # TODO: check dict union for duplicate arguments here
+    return ArgumentParser(parsers | kwargs, arg_help, func)

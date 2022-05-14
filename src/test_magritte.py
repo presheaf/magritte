@@ -1,5 +1,6 @@
-from typing import Tuple, Annotated, List, Optional, Literal
+from typing import Tuple, Annotated, List, Set, Optional, Literal
 from parsers import make_parser, ArgumentParser, guess_parser
+from dispatch import single_dispatch
 
 # def infer_parser_arg_from_type(argname: str, argtype: Type[T], argdefault: T) -> SingleArgParser[T]:
 #     helpstr = f'Help for {argname}: {repr(argtype)}'
@@ -34,28 +35,33 @@ def test_int_list_parser():
     print(parser._parse_argv(argv))
 
 
-MyAnnotatedListType = Annotated[List[int], "some integers"]
+MyAnnotatedSetType = Annotated[Set[int], "some integers"]
 
 
 def example_func(
-        integers: MyAnnotatedListType,
+        integers: MyAnnotatedSetType,
         offset: Optional[int],
         operation: Literal['add', 'max'] = 'add',
         double=False
 ) -> int:
-    if offset is None:
-        offset = 0
+    """Just an example function"""
+
+    if numeric_offset is None:
+        numeric_offset = 0
     if operation == 'add':
-        v = offset + sum(integers)
+        v = numeric_offset + sum(integers)
     else:
-        v = offset + max(integers)
+        v = numeric_offset + max(integers)
     return 2 * v if double else v
 
 
 def test_example_func():
     parser = make_parser(example_func)
-    print(parser._parse_argv(['-i', '1', '2', '4', '--operation', 'max', '--offset', 'None']))
+    print(parser._parse_argv(['-i', '1', '2', '2', '4', '--operation', 'max', '--offset', 'None']))
 
 
-test_int_list_parser()
-test_example_func()
+# test_int_list_parser()
+# test_example_func()
+
+
+single_dispatch(example_func)

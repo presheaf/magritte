@@ -1,9 +1,11 @@
 import string
 import inspect
-from argparse import Namespace
-from typing import List, Generic, Optional, TypeVar, Dict, Tuple
-
+# from argparse import Namespace
+from typing import List, Generic, Optional, TypeVar, Dict, Tuple, Callable, Type
+from collections import defaultdict
 T = TypeVar('T')
+from pprint import pprint
+UNINITIALIZED = object()
 
 
 class SingleArgParser(Generic[T]):
@@ -33,7 +35,7 @@ class SingleArgParser(Generic[T]):
 
 
 class ArgumentParser:
-    def __init__(self, parsers: Dict[str, SingleArgParser]):
+    def __init__(self, parsers: Dict[str, SingleArgParser], arg_annotation: Dict[str, Tuple[str, Type]], func: Callable):
         self.arg_parsers = parsers
 
         # Dict mapping some way to pass an arg to the corresponding parser
@@ -55,6 +57,29 @@ class ArgumentParser:
             for arg_format in indicates_self:
                 self.arg_formats[arg_format] = argname
 
+        _arg_formats_inverse = defaultdict(list)
+        for fmt, argname in self.arg_formats.items():
+            _arg_formats_inverse[argname].append(fmt)
+
+        help_indent = ' ' * 4
+        # TODO: Add "example call cmd" to help_message (see any manpage)
+        self.help_message = f'{func.__name__}'
+        if func.__doc__:
+            self.help_message += ':\n' + help_indent + func.__doc__
+        arg_help = '\nArguments:'
+
+        # TODO: clearly the constructor should just be parsing everything here
+        # or more pragmatically it should take in other stuff, and there should be an ArgumentParser.make_parser thing
+        for argname, (help_str, argtype) in arg_annotation.items():
+            arg_format_description = ', '.join(sorted(_arg_formats_inverse[argname], key=len)) + ':'
+            arg_help += f'\n{help_indent}{arg_format_description:<50}{argtype}'
+            if help_str:
+                arg_help += '\n' + help_indent * 2 + help_str
+            if self.arg_parsers[argname].has_default_value():
+                default_value = self.arg_parsers[argname].default_value
+                arg_help += '\n' + help_indent * 2 + f'Default: {default_value}'
+        self.help_message += arg_help
+
     def _parse_argv(self, args: List[str]):
         result = {}
 
@@ -72,9 +97,13 @@ class ArgumentParser:
 
         for argname, argparser in self.arg_parsers.items():
             if argname not in result:
-                assert argparser.has_default_value(), f"Didn't pass {argname}"
-                result[argname] = argparser.default_value
-        return Namespace(**result)
+                result[argname] = argparser.default_value if argparser.has_default_value() else UNINITIALIZED
+
+        return result
+
+    def _validate_args(self, result):
+        for argname, argparser in self.arg_parsers.items():
+            assert result[argname] != UNINITIALIZED, f"Didn't pass {argname}"
 
     def argstr_to_argname(self, argstr: str) -> Optional[str]:
         """Check which argname this arg string indicates, or None if it doesn't."""
