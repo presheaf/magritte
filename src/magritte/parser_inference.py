@@ -1,31 +1,18 @@
 from __future__ import annotations
 
-import typing
-import logging
 import inspect
+import logging
 import string
-from typing import List, Set, Tuple, Type, Callable, Annotated, Literal, Union
+import typing
+from typing import Annotated, Callable, List, Literal, Set, Tuple, Type, Union
 
-from magritte import SingleArgParser, ArgumentParser
-
-
-# logging.getLogger().setLevel(logging.DEBUG)
-
-
-def strtobool(s: str) -> bool:
-    if s in {'y', 'yes', 't', 'true', 'on', '1'}:
-        return True
-    elif s in {'n', 'no', 'f', 'false', 'off', '0'}:
-        return False
-    else:
-        raise ValueError
-
+from .argument_parser import ArgumentParser, SingleArgParser
 
 class ListParser(SingleArgParser[List]):
     def __init__(self, elttype, **kwargs):
         super().__init__(**kwargs)
         self.__type_str = repr(elttype)
-        self.subparser = guess_parser(elttype)
+        self.subparser = infer_parser(elttype)
 
     def parse_single_arg(self, arg_format, args, parser):
         log_prefix = f"ListParser[{self.__type_str}]"
@@ -61,7 +48,7 @@ class TupleParser(SingleArgParser[Tuple]):
     def __init__(self, *elttypes, **kwargs):
         super().__init__(**kwargs)
         self.__type_str = repr(list(elttypes))
-        self.subparsers = [guess_parser(t) for t in elttypes]
+        self.subparsers = [infer_parser(t) for t in elttypes]
 
     def parse_single_arg(self, arg_format, args, parser):
         log_prefix = f"TupleParser[{self.__type_str}]"
@@ -72,18 +59,22 @@ class TupleParser(SingleArgParser[Tuple]):
         for subparser in self.subparsers:  # first T1, then T2, etc
             # Note: If subparser ValueErrors, we fail to parse the thing by letting it bubble upwards
             nargs, argval = subparser(arg_format, args, parser)
-            logging.debug(f"{log_prefix}: Subparser parsed {nargs} args and got {argval}")
+            logging.debug(
+                f"{log_prefix}: Subparser parsed {nargs} args and got {argval}"
+            )
             parsed_args.append(argval)
             num_parsed_args += nargs
             args = args[nargs:]
-        logging.debug(f"{log_prefix}: Parsed {num_parsed_args} args and got {tuple(parsed_args)}")
+        logging.debug(
+            f"{log_prefix}: Parsed {num_parsed_args} args and got {tuple(parsed_args)}"
+        )
         return num_parsed_args, tuple(parsed_args)
 
 
 class UnionParser(SingleArgParser):
     def __init__(self, *union_types: Type, **kwargs):
         super().__init__(**kwargs)
-        self.subparsers = [guess_parser(t) for t in union_types]
+        self.subparsers = [infer_parser(t) for t in union_types]
         self.__type_str = repr(list(union_types))
 
     def parse_single_arg(self, arg_format, args, parser: ArgumentParser):
@@ -99,7 +90,9 @@ class LiteralParser(SingleArgParser):
     def __init__(self, *literals, **kwargs):
         super().__init__(**kwargs)
         literal_types = {type(lit) for lit in literals}
-        assert literal_types.issubset({int, str, type(None)}), "Only int, str, None literals supported"
+        assert literal_types.issubset(
+            {int, str, type(None)}
+        ), "Only int, str, None literals supported"
         self.literals = literals
         self.__type_str = repr(list(self.literals))
 
@@ -109,7 +102,7 @@ class LiteralParser(SingleArgParser):
         for literal in self.literals:
             if str(literal) == args[0]:
                 return 1, literal
-        raise ValueError(f'{args[0]} unknown repr of Literal{self.__type_str}')
+        raise ValueError(f"{args[0]} unknown repr of Literal{self.__type_str}")
 
 
 class IntParser(SingleArgParser[int]):
@@ -121,7 +114,7 @@ class IntParser(SingleArgParser[int]):
 class NoneParser(SingleArgParser[None]):
     def parse_single_arg(self, arg_format, args, parser):
         logging.debug(f"NoneParser {args}")
-        if args[0] != 'None':
+        if args[0] != "None":
             raise ValueError
         return 1, None
 
@@ -138,6 +131,15 @@ class StrParser(SingleArgParser[str]):
         return 1, str(args[0])
 
 
+def strtobool(s: str) -> bool:
+    if s in {"y", "yes", "t", "true", "on", "1"}:
+        return True
+    elif s in {"n", "no", "f", "false", "off", "0"}:
+        return False
+    else:
+        raise ValueError
+
+
 class BoolParser(SingleArgParser[bool]):
     #   -should_log True/true/1/t/T   => True
     #   -should_log False/false/1/f/F => False
@@ -145,27 +147,27 @@ class BoolParser(SingleArgParser[bool]):
     #   --no-should_log               => False
     #   --not-should_log              => False
     #  Note: intentionally leaving out -s here
-    
+
     def parse_single_arg(self, arg_format, args, parser: ArgumentParser):
         logging.debug(f"BoolParser {arg_format} {args}")
         argname = parser.argstr_to_argname(arg_format)
-        if arg_format == f'-{argname}':
+        if arg_format == f"-{argname}":
             return 1, strtobool(args[0])
         else:
-            return 0, arg_format == f'--{argname}'
+            return 0, arg_format == f"--{argname}"
 
     def argname_representations(self, argname) -> List[str]:
         argname = argname.lower()
-        assert argname and argname[0] in string.ascii_lowercase, f"Illegal argname: {repr(argname)}"
+        assert (
+            argname and argname[0] in string.ascii_lowercase
+        ), f"Illegal argname: {repr(argname)}"
 
-        return [f'-{argname}', f'--{argname}', f'--no-{argname}', f'--not-{argname}']
+        return [f"-{argname}", f"--{argname}", f"--no-{argname}", f"--not-{argname}"]
 
 
-_special_types = {
-    Annotated: lambda t, t_str: t
-}
+SPECIAL_TYPES = {Annotated: lambda t, t_str: t}
 
-_all_the_parsers = {
+TYPE_TO_PARSER = {
     bool: BoolParser,
     int: IntParser,
     str: StrParser,
@@ -177,27 +179,37 @@ _all_the_parsers = {
     set: SetParser,
     Set: SetParser,
     Literal: LiteralParser,
-    Union: UnionParser
+    Union: UnionParser,
 }
 
 
-def guess_parser(argtype: Type, default_value=inspect._empty):
+def infer_parser(argtype: Type, default_value=inspect._empty):
+    """Given the type/default value of a parameter, infer a reasonable parser."""
     basetype, typeargs = typing.get_origin(argtype), typing.get_args(argtype)
-    logging.info(f"Trying to guess parser for {argtype} -> {basetype}, {typeargs}")
-    if basetype in _special_types:
-        logging.info(f"Doing special transform of {argtype} -> {typeargs}")
-        return guess_parser(_special_types[basetype](*typeargs), default_value)
+    logging.debug(
+        f"Trying to guess parser for {argtype} -> {basetype}, {typeargs} with default={default_value}"
+    )
+    if basetype in SPECIAL_TYPES:
+        logging.debug(f"Doing special transform of {argtype} -> {typeargs}")
+        return infer_parser(SPECIAL_TYPES[basetype](*typeargs), default_value)
 
-    if argtype in _all_the_parsers:
-        logging.info(f"Found parser for {argtype}!")
-        return _all_the_parsers[argtype](default_value=default_value)
+    if argtype == inspect._empty and default_value != inspect._empty:
+        inferred_argtype = type(default_value)
+        logging.debug(f"Inferring type {inferred_argtype} of parameter from default")
+        return infer_parser(inferred_argtype, default_value)
 
-    if basetype in _all_the_parsers:
-        logging.info(f"Found parser for {basetype}{list(typeargs)}!")
-        return _all_the_parsers[basetype](*typeargs, default_value=default_value)
+    if argtype in TYPE_TO_PARSER:
+        logging.debug(f"Found parser for {argtype}!")
+        return TYPE_TO_PARSER[argtype](default_value=default_value)
+
+    if basetype in TYPE_TO_PARSER:
+        logging.debug(f"Found parser for {basetype}{list(typeargs)}!")
+        return TYPE_TO_PARSER[basetype](*typeargs, default_value=default_value)
     else:
-        logging.info(f"No parser found for {basetype}{list(typeargs)} - fallback to str")
-        return _all_the_parsers[str](default_value=default_value)
+        logging.debug(
+            f"No parser found for {basetype}{list(typeargs)} - fallback to str"
+        )
+        return TYPE_TO_PARSER[str](default_value=default_value)
 
 
 def arg_description(argname: str, argtype: Type, default_value=inspect._empty):
@@ -210,8 +222,8 @@ def arg_description(argname: str, argtype: Type, default_value=inspect._empty):
         type_str = ""
     else:
         type_str = str(argtype)
-        if type_str.startswith('typing.'):  # horrible hack...
-            type_str = type_str[len('typing.'):]
+        if type_str.startswith("typing."):  # horrible hack...
+            type_str = type_str[len("typing."):]
     return help_message, type_str
 
 
@@ -222,8 +234,11 @@ def make_parser(func: Callable, **kwargs) -> ArgumentParser:
     arg_help = {}
 
     for param in signature.parameters.values():
-        arg_help[param.name] = arg_description(param.name, param.annotation, param.default)
-        parsers[param.name] = guess_parser(param.annotation, param.default)
+        logging.debug(f"Guessing parser for {param}")
+        arg_help[param.name] = arg_description(
+            param.name, param.annotation, param.default
+        )
+        parsers[param.name] = infer_parser(param.annotation, param.default)
 
     # TODO: check dict union for duplicate arguments here
     return ArgumentParser(parsers | kwargs, arg_help, func)

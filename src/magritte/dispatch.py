@@ -1,18 +1,18 @@
 import sys
-from parsers import BoolParser
 from typing import Callable
-from parsers import make_parser
-
+from .parser_inference import make_parser, BoolParser
 
 def single_dispatch(func: Callable):
     help_parser = BoolParser(default_value=False)
     parser = make_parser(func, help=help_parser)
     try:
-        args = parser._parse_argv(sys.argv[1:])
-        if args["help"]:
+        parsed_args = parser._parse_argv(sys.argv[1:])
+        if parsed_args["help"]:
             print(parser.help_message)
             sys.exit(0)
-        parser._validate_args(args)
+        parser._validate_args(parsed_args)
+        if "help" in parsed_args:
+            del parsed_args["help"]
 
     except (ValueError, AssertionError) as e:
         print(f"Error parsing args: {e}")
@@ -20,5 +20,4 @@ def single_dispatch(func: Callable):
         sys.exit(1)
 
     else:
-        print(f"Calling {func.__name__} with {args}")
-        pass
+        func(**parsed_args)

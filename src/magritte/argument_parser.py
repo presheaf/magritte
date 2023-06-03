@@ -1,7 +1,7 @@
 import string
 import inspect
 # from argparse import Namespace
-from typing import List, Generic, Optional, TypeVar, Dict, Tuple, Callable, Type
+from typing import List, Generic, Optional, TypeVar, Dict, Tuple, Callable, Type, Any
 from collections import defaultdict
 T = TypeVar('T')
 from pprint import pprint
@@ -9,9 +9,6 @@ UNINITIALIZED = object()
 
 
 class SingleArgParser(Generic[T]):
-    # TODO: This metaclass could automagically register stuff with margritte
-    #       Not sure there's a real point to having the type parameter here...
-
     def __init__(self, default_value=inspect._empty):
         self.default_value = default_value
 
@@ -41,11 +38,12 @@ class ArgumentParser:
         # Dict mapping some way to pass an arg to the corresponding parser
         # (e.g. '-argname', '-a', '--argname' -> the parser for the arg 'argname')
         self.arg_formats: Dict[str, str] = {}
+
         # Compute the indicating sets somehow
         _indicators = {argname: parser.argname_representations(argname)
                        for argname, parser in self.arg_parsers.items()}
 
-        # If an argument could indicate other things,
+        # Treat the case when parameter names overlap, meaning --param_a is needed and -p won't work
         for argname in self.arg_parsers:
             indicates_self = set(_indicators[argname])
             for other_argname in self.arg_parsers:
@@ -62,6 +60,7 @@ class ArgumentParser:
             _arg_formats_inverse[argname].append(fmt)
 
         help_indent = ' ' * 4
+
         # TODO: Add "example call cmd" to help_message (see any manpage)
         self.help_message = f'{func.__name__}'
         if func.__doc__:
@@ -80,7 +79,7 @@ class ArgumentParser:
                 arg_help += '\n' + help_indent * 2 + f'Default: {default_value}'
         self.help_message += arg_help
 
-    def _parse_argv(self, args: List[str]):
+    def _parse_argv(self, args: List[str]) -> Dict[str, Any]:
         result = {}
 
         while args:
